@@ -1,4 +1,4 @@
-﻿# Enhanced AutoDesk Package Tool
+# Enhanced AutoDesk Package Tool
 # Version: 2.0
 # Enhanced with comprehensive error handling, validation, and logging
 #
@@ -580,23 +580,67 @@ function Get-SummaryInfo {
     $productCode = "Unknown"
     $installerVersion = "0.0.0.0"
     
-    # Enhanced parsing with multiple fallback patterns
-    Write-LogMessage "Parsing program name..." "INFO"
-    if ($summaryContent -match "(?ms)^Deployment:\s*(.+?)\s*$") {
-        $programName = $matches[1].Trim()
-        Write-LogMessage "Found program name from 'Deployment': $programName" "SUCCESS"
-    } elseif ($summaryContent -match "(?ms)^Product:\s*(.+?)\s*$") {
-        $programName = $matches[1].Trim()
-        Write-LogMessage "Found program name from 'Product': $programName" "SUCCESS"
-    } elseif ($summaryContent -match "(?ms)^Application:\s*(.+?)\s*$") {
-        $programName = $matches[1].Trim()
-        Write-LogMessage "Found program name from 'Application': $programName" "SUCCESS"
-    } else {
-        Write-LogMessage "Could not determine program name from Summary.txt" "WARNING"
-        # Show first few lines for debugging
-        $summaryLines = $summaryContent -split "`n" | Select-Object -First 10
-        Write-LogMessage "First 10 lines of Summary.txt for debugging:" "INFO"
-        $summaryLines | ForEach-Object { Write-LogMessage "  $_" "INFO" }
+    # Enhanced parsing for actual product name (not deployment name)
+    Write-LogMessage "Parsing actual product name..." "INFO"
+    
+    # Look for the actual product name in various sections
+    $productNamePatterns = @(
+        "(?ms)^([^:\r\n]+)\s*[\r\n]+.*?Product Code:\s*\{[A-F0-9\-]+\}",  # Product name above Product Code
+        "(?ms)^([^:\r\n]+)\s*[\r\n]+.*?Build number:\s*[\d\.]+",          # Product name above Build number
+        "(?ms)^Deployment:\s*(.+?)\s*[\r\n]+.*?^([^:\r\n]+)\s*[\r\n]+.*?Product Code:",  # Second line after Deployment
+        "(?ms)^Product:\s*(.+?)\s*$",                                      # Direct Product field
+        "(?ms)^Application:\s*(.+?)\s*$"                                   # Direct Application field
+    )
+    
+    foreach ($pattern in $productNamePatterns) {
+        if ($summaryContent -match $pattern) {
+            $candidateName = $matches[1].Trim()
+            
+            # Skip if it looks like a deployment name (contains underscores and version numbers)
+            if ($candidateName -notmatch "_\d+\.\d+" -and $candidateName -ne "Deployment" -and $candidateName.Length -gt 3) {
+                $programName = $candidateName
+                Write-LogMessage "Found product name: $programName" "SUCCESS"
+                break
+            } elseif ($matches.Count -gt 2 -and $matches[2]) {
+                # Try the second match if available
+                $candidateName = $matches[2].Trim()
+                if ($candidateName -notmatch "_\d+\.\d+" -and $candidateName -ne "Deployment" -and $candidateName.Length -gt 3) {
+                    $programName = $candidateName
+                    Write-LogMessage "Found product name (second match): $programName" "SUCCESS"
+                    break
+                }
+            }
+        }
+    }
+    
+    # If still not found, try to extract from lines containing common AutoDesk product names
+    if ($programName -eq "Unknown") {
+        Write-LogMessage "Trying alternative product name detection..." "INFO"
+        $lines = $summaryContent -split "`n"
+        foreach ($line in $lines) {
+            $line = $line.Trim()
+            # Look for lines containing known AutoDesk products
+            if ($line -match "(Revit|AutoCAD|Maya|3ds Max|Inventor|Fusion|Civil 3D|Plant 3D)\s*\d{4}" -and $line -notmatch "_") {
+                $programName = $line
+                Write-LogMessage "Found product name from line scan: $programName" "SUCCESS"
+                break
+            }
+        }
+    }
+    
+    # Last resort: Use deployment name but clean it up
+    if ($programName -eq "Unknown") {
+        Write-LogMessage "Using deployment name as fallback..." "WARNING"
+        if ($summaryContent -match "(?ms)^Deployment:\s*(.+?)\s*$") {
+            $deploymentName = $matches[1].Trim()
+            # Try to clean up deployment name (remove version suffixes)
+            if ($deploymentName -match "^([^_]+)_\d+") {
+                $programName = $matches[1] -replace "_", " "
+                Write-LogMessage "Cleaned deployment name: $programName" "INFO"
+            } else {
+                $programName = $deploymentName
+            }
+        }
     }
     
     # Parse build number with validation
@@ -644,10 +688,21 @@ function Get-SummaryInfo {
     
     # Display summary
     Write-LogMessage "=== PARSED INFORMATION SUMMARY ===" "INFO"
-    Write-LogMessage "Program Name     : $programName" "INFO"
+    Write-LogMessage "Product Name     : $programName" "INFO"
     Write-LogMessage "Build Number     : $buildNumber" "INFO"
     Write-LogMessage "Product Code     : $productCode" "INFO"
     Write-LogMessage "Installer Version: $installerVersion" "INFO"
+    
+    # Validate that we got the essential information
+    if ($productCode -eq "Unknown" -or $buildNumber -eq "0.0.0.0") {
+        Write-LogMessage "WARNING: Missing essential information for Intune deployment" "WARNING"
+        Write-LogMessage "This may affect detection rule accuracy" "WARNING"
+        
+        # Show first 10 lines for debugging
+        Write-LogMessage "First 10 lines of Summary.txt for debugging:" "INFO"
+        $summaryLines = $summaryContent -split "`n" | Select-Object -First 10
+        $summaryLines | ForEach-Object { Write-LogMessage "  $_" "INFO" }
+    }
     
     return $summaryInfo
 }
@@ -1138,14 +1193,20 @@ Install Behavior    : System
 Restart Behavior    : Determine behavior based on return codes
 Return Codes        : 0=Success, 3010=Success (restart required)
 
-DETECTION RULE SUGGESTION:
--------------------------
+DETECTION RULE (RECOMMENDED):
+----------------------------
+Detection Type      : MSI
+Product Code        : $($SummaryInfo.ProductCode)
+Product Version     : $($SummaryInfo.BuildNumber)
+
+ALTERNATIVE DETECTION RULE:
+---------------------------
 Detection Type      : Registry
-Registry Key        : HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-Value Name          : DisplayName
-Detection Method    : String comparison
-Operator           : Contains
-Value              : $($SummaryInfo.ProgramName)
+Registry Key        : HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$($SummaryInfo.ProductCode)
+Registry Value      : DisplayVersion
+Detection Method    : Version comparison
+Operator           : Greater than or equal to
+Value              : $($SummaryInfo.BuildNumber)
 
 REQUIREMENTS:
 ------------
@@ -1162,12 +1223,22 @@ DEPLOYMENT NOTES:
 4. Supports upgrade scenarios
 5. Includes comprehensive logging
 
+INTUNE SETUP STEPS:
+------------------
+1. Upload the .intunewin file to Intune
+2. Configure detection rule using MSI Product Code (recommended)
+3. Set install/uninstall commands as shown above
+4. Configure requirements as listed
+5. Set install behavior to "System"
+6. Configure assignments and deployment
+
 TROUBLESHOOTING:
 ---------------
 - Check Windows Event Log (Application) for detailed installation logs
 - Verify PowerShell execution policy allows script execution
 - Ensure target devices have sufficient disk space
 - Validate network connectivity for license activation (if required)
+- Use MSI Product Code detection for most reliable application detection
 
 =============================================================================
 "@
