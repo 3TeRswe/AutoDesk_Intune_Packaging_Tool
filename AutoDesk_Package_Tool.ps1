@@ -1,4 +1,4 @@
-# Enhanced AutoDesk Package Tool
+ # Enhanced AutoDesk Package Tool
 # Version: 2.0
 # Enhanced with comprehensive error handling, validation, and logging
 #
@@ -7,24 +7,75 @@
 # -AutoDeskTempPath: Path where AutoDesk packages are deployed (default: C:\Windows\Temp\AutoDesk)
 # -ForceDownload: Force download of IntuneWinAppUtil.exe even if it already exists
 # -MaxFileAgeDays: Maximum age in days before redownloading IntuneWinAppUtil.exe (default: 30)
+# -ScriptOnly: Skip packaging and create only PowerShell installation script
 #
 # EXAMPLES:
 # .\AutoDesk_Package_Tool.ps1
 # .\AutoDesk_Package_Tool.ps1 -ForceDownload
 # .\AutoDesk_Package_Tool.ps1 -MaxFileAgeDays 7
 # .\AutoDesk_Package_Tool.ps1 -BasePath "D:\Intune" -ForceDownload
+# .\AutoDesk_Package_Tool.ps1 -ScriptOnly
 
 param(
     [string]$BasePath = "C:\Intune",
     [string]$AutoDeskTempPath = "C:\Windows\Temp\AutoDesk",
     [switch]$ForceDownload,
-    [int]$MaxFileAgeDays = 30
+    [int]$MaxFileAgeDays = 30,
+    [switch]$ScriptOnly
 )
 
 # Global variables
 $Script:LogFile = Join-Path $env:TEMP "AutoDesk_Package_Tool_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
+function Select-PackagingMode {
+    param([switch]$ScriptOnly)
+    
+    # If ScriptOnly parameter was specified, return that mode
+    if ($ScriptOnly) {
+        Write-LogMessage "Script-only mode specified via parameter" "INFO"
+        return "ScriptOnly"
+    }
+
 #region Helper Functions
+    
+    Write-LogMessage "=== PACKAGING MODE SELECTION ===" "INFO"
+    Write-Host ""
+    Write-Host "AutoDesk Package Tool - Select Packaging Mode" -ForegroundColor Cyan
+    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "What would you like to create?" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "1. Complete Intune Package" -ForegroundColor White
+    Write-Host "   - Creates .zip package from AutoDesk deployment" -ForegroundColor Gray
+    Write-Host "   - Generates PowerShell installation script" -ForegroundColor Gray
+    Write-Host "   - Creates .intunewin file for Intune upload" -ForegroundColor Gray
+    Write-Host "   - Generates deployment configuration guide" -ForegroundColor Gray
+    Write-Host "   - Use this when starting from scratch" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "2. PowerShell Script Only" -ForegroundColor White
+    Write-Host "   - Generates only the PowerShell installation script" -ForegroundColor Gray
+    Write-Host "   - Creates deployment configuration guide" -ForegroundColor Gray
+    Write-Host "   - Use this when you already have a .intunewin package" -ForegroundColor Green
+    Write-Host "   - Perfect for updating scripts with better logging" -ForegroundColor Green
+    Write-Host ""
+    
+    do {
+        $selection = Read-Host "Select option (1 or 2)"
+        switch ($selection) {
+            "1" {
+                Write-LogMessage "User selected: Complete Intune Package" "INFO"
+                return "Complete"
+            }
+            "2" {
+                Write-LogMessage "User selected: PowerShell Script Only" "INFO"
+                return "ScriptOnly"
+            }
+            default {
+                Write-Host "Invalid selection. Please enter 1 or 2." -ForegroundColor Red
+            }
+        }
+    } while ($true)
+}
 
 function Write-LogMessage {
     param(
@@ -966,7 +1017,7 @@ param(
 function Write-InstallLog {
     param([string]`$Message, [string]`$Level = "INFO")
     `$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    `$logEntry = "[`$timestamp] `$Level`: `$Message"
+    `$logEntry = "[`$timestamp] `${Level}: `${Message}"
     Write-Host `$logEntry
     # Add to Windows Event Log if possible
     try {
@@ -1056,7 +1107,7 @@ function Install-Application {
         Write-InstallLog "Package extracted successfully" "SUCCESS"
         
         # Run installation
-        `$arguments = "-i deploy --offline_mode -q -o `"`$collectionXmlPath`" --installer_version `"`$installerVersion`""
+        `$arguments = "-i deploy --offline_mode -q -o ``"`$collectionXmlPath``"` --installer_version ``"`$installerVersion``"`"
         Write-InstallLog "Running installer with arguments: `$arguments" "INFO"
         
         `$process = Start-Process -FilePath `$installerPath -ArgumentList `$arguments -Wait -PassThru -WindowStyle Hidden
@@ -1234,11 +1285,28 @@ INTUNE SETUP STEPS:
 
 TROUBLESHOOTING:
 ---------------
-- Check Windows Event Log (Application) for detailed installation logs
+- Installation logs are saved to: C:\Windows\Temp\Intune\{AppName}\InstallationLogs\
+  * Install_Action_YYYYMMDD_HHMMSS.log - PowerShell script execution log
+  * AutoDesk_Installer_YYYYMMDD_HHMMSS.log - AutoDesk installer output and errors
+  * System_Info_YYYYMMDD_HHMMSS.log - System information at time of installation
+- Check Windows Event Log (Application) for high-level installation events
 - Verify PowerShell execution policy allows script execution
 - Ensure target devices have sufficient disk space
 - Validate network connectivity for license activation (if required)
 - Use MSI Product Code detection for most reliable application detection
+
+LOG FILE EXAMPLES:
+-----------------
+For Revit 2025 installation, logs will be created in:
+C:\Windows\Temp\Intune\Revit_2025\InstallationLogs\
+├── Install_Install_20250708_143022.log      # PowerShell script log
+├── AutoDesk_Installer_20250708_143022.log   # AutoDesk installer detailed output
+└── System_Info_20250708_143022.log          # System specifications
+
+For troubleshooting failed installations:
+1. Check the Install_*.log for PowerShell script issues
+2. Check the AutoDesk_Installer_*.log for installer-specific errors
+3. Review System_Info_*.log for compatibility issues
 
 =============================================================================
 "@
@@ -1402,6 +1470,7 @@ Write-LogMessage "  Base path: $BasePath" "INFO"
 Write-LogMessage "  AutoDesk temp path: $AutoDeskTempPath" "INFO"
 Write-LogMessage "  Force download: $ForceDownload" "INFO"
 Write-LogMessage "  Max file age: $MaxFileAgeDays days" "INFO"
+Write-LogMessage "  Script only mode: $ScriptOnly" "INFO"
 
 try {
     # Step 1: Check prerequisites
@@ -1412,19 +1481,14 @@ try {
         exit 1
     }
     
-    # Step 2: Create required folders
+    # Step 2: Select packaging mode
+    $packagingMode = Select-PackagingMode -ScriptOnly:$ScriptOnly
+    Write-LogMessage "Selected packaging mode: $packagingMode" "SUCCESS"
+    
+    # Step 3: Create required folders
     if (!(New-RequiredFolders -BasePath $BasePath)) {
         Write-Host ""
         Write-Host "Failed to create required folders. Please check permissions and try again." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    
-    # Step 3: Get IntuneWinAppUtil
-    $intuneToolPath = Get-IntuneWinAppUtil -BasePath $BasePath -ForceDownload:$ForceDownload -MaxFileAgeDays $MaxFileAgeDays
-    if (!$intuneToolPath) {
-        Write-Host ""
-        Write-Host "Failed to acquire IntuneWinAppUtil.exe. Please check your internet connection and try again." -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
@@ -1458,64 +1522,115 @@ try {
         exit 1
     }
     
-    # Step 8: Create application package
-    $packagePath = New-ApplicationPackage -SelectedFolder $selectedFolder -BasePath $BasePath
-    if (!$packagePath) {
+    if ($packagingMode -eq "Complete") {
+        Write-LogMessage "=== COMPLETE PACKAGE MODE ===" "INFO"
+        Write-LogMessage "Creating full Intune package with all components..." "INFO"
+        
+        # Step 8: Get IntuneWinAppUtil (only needed for complete package)
+        $intuneToolPath = Get-IntuneWinAppUtil -BasePath $BasePath -ForceDownload:$ForceDownload -MaxFileAgeDays $MaxFileAgeDays
+        if (!$intuneToolPath) {
+            Write-Host ""
+            Write-Host "Failed to acquire IntuneWinAppUtil.exe. Please check your internet connection and try again." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        
+        # Step 9: Create application package
+        $packagePath = New-ApplicationPackage -SelectedFolder $selectedFolder -BasePath $BasePath
+        if (!$packagePath) {
+            Write-Host ""
+            Write-Host "Failed to create application package." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        
+        # Step 10: Generate installation script
+        $scriptPath = New-InstallationScript -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
+        if (!$scriptPath) {
+            Write-Host ""
+            Write-Host "Failed to generate installation script." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        
+        # Step 11: Generate Intune deployment info
+        $intuneInfoPath = New-IntuneInfo -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
+        if (!$intuneInfoPath) {
+            Write-LogMessage "Failed to generate Intune info file (non-critical)" "WARNING"
+        }
+        
+        # Step 12: Create Intune Win32 package
+        Write-LogMessage "Preparing for Intune packaging..." "INFO"
+        Write-LogMessage "Files to be included in Intune package:" "INFO"
+        Write-LogMessage "  1. $(Split-Path $packagePath -Leaf) - AutoDesk application package" "INFO"
+        Write-LogMessage "  2. $(Split-Path $scriptPath -Leaf) - PowerShell installation script" "INFO"
+        Write-LogMessage "No other files from previous runs will be included" "SUCCESS"
+        
+        $outputFolder = Join-Path $BasePath "Output"
+        
+        $intunePackagePath = Invoke-IntunePackaging -IntuneToolPath $intuneToolPath -PackageZipPath $packagePath -InstallScriptPath $scriptPath -ApplicationName $selectedFolder.Name -OutputFolder $outputFolder
+        
+        if ($intunePackagePath) {
+            Write-LogMessage "=== COMPLETE PACKAGE CREATION COMPLETED SUCCESSFULLY ===" "SUCCESS"
+            Write-Host ""
+            Write-Host "Complete Package Creation Summary:" -ForegroundColor Green
+            Write-Host "==================================" -ForegroundColor Green
+            Write-Host "Application: $($summaryInfo.ProgramName) v$($summaryInfo.BuildNumber)" -ForegroundColor White
+            Write-Host "Intune Package: $(Split-Path $intunePackagePath -Leaf)" -ForegroundColor White
+            Write-Host "Package Location: $intunePackagePath" -ForegroundColor White
+            Write-Host "Installation Script: $(Split-Path $scriptPath -Leaf)" -ForegroundColor White
+            Write-Host "Deployment Info: $intuneInfoPath" -ForegroundColor White
+            Write-Host "Log File: $Script:LogFile" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "Next Steps:" -ForegroundColor Cyan
+            Write-Host "1. Upload the .intunewin file to Microsoft Intune" -ForegroundColor White
+            Write-Host "2. Use the deployment info file for configuration guidance" -ForegroundColor White
+            Write-Host "3. Test deployment on a pilot group first" -ForegroundColor White
+            Write-Host ""
+        } else {
+            Write-LogMessage "Intune packaging failed, but other components were created successfully" "WARNING"
+            Write-Host ""
+            Write-Host "Partial Success:" -ForegroundColor Yellow
+            Write-Host "===============" -ForegroundColor Yellow
+            Write-Host "The installation script and package were created, but Intune packaging failed." -ForegroundColor White
+            Write-Host "You can manually run IntuneWinAppUtil.exe on the generated files." -ForegroundColor White
+        }
+        
+    } else {
+        Write-LogMessage "=== SCRIPT-ONLY MODE ===" "INFO"
+        Write-LogMessage "Creating PowerShell installation script and deployment guide only..." "INFO"
+        
+        # Step 8: Generate installation script only
+        $scriptPath = New-InstallationScript -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
+        if (!$scriptPath) {
+            Write-Host ""
+            Write-Host "Failed to generate installation script." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        
+        # Step 9: Generate Intune deployment info
+        $intuneInfoPath = New-IntuneInfo -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
+        if (!$intuneInfoPath) {
+            Write-LogMessage "Failed to generate Intune info file (non-critical)" "WARNING"
+        }
+        
+        Write-LogMessage "=== SCRIPT-ONLY MODE COMPLETED SUCCESSFULLY ===" "SUCCESS"
         Write-Host ""
-        Write-Host "Failed to create application package." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    
-    # Step 9: Generate installation script
-    $scriptPath = New-InstallationScript -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
-    if (!$scriptPath) {
-        Write-Host ""
-        Write-Host "Failed to generate installation script." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    
-    # Step 10: Generate Intune deployment info
-    $intuneInfoPath = New-IntuneInfo -SelectedFolder $selectedFolder -SummaryInfo $summaryInfo -BasePath $BasePath
-    if (!$intuneInfoPath) {
-        Write-LogMessage "Failed to generate Intune info file (non-critical)" "WARNING"
-    }
-    
-    # Step 11: Create Intune Win32 package
-    Write-LogMessage "Preparing for Intune packaging..." "INFO"
-    Write-LogMessage "Files to be included in Intune package:" "INFO"
-    Write-LogMessage "  1. $(Split-Path $packagePath -Leaf) - AutoDesk application package" "INFO"
-    Write-LogMessage "  2. $(Split-Path $scriptPath -Leaf) - PowerShell installation script" "INFO"
-    Write-LogMessage "No other files from previous runs will be included" "SUCCESS"
-    
-    $outputFolder = Join-Path $BasePath "Output"
-    
-    $intunePackagePath = Invoke-IntunePackaging -IntuneToolPath $intuneToolPath -PackageZipPath $packagePath -InstallScriptPath $scriptPath -ApplicationName $selectedFolder.Name -OutputFolder $outputFolder
-    
-    if ($intunePackagePath) {
-        Write-LogMessage "=== PACKAGE CREATION COMPLETED SUCCESSFULLY ===" "SUCCESS"
-        Write-Host ""
-        Write-Host "Package Creation Summary:" -ForegroundColor Green
-        Write-Host "========================" -ForegroundColor Green
+        Write-Host "Script-Only Mode Summary:" -ForegroundColor Green
+        Write-Host "=========================" -ForegroundColor Green
         Write-Host "Application: $($summaryInfo.ProgramName) v$($summaryInfo.BuildNumber)" -ForegroundColor White
-        Write-Host "Intune Package: $(Split-Path $intunePackagePath -Leaf)" -ForegroundColor White
-        Write-Host "Package Location: $intunePackagePath" -ForegroundColor White
+        Write-Host "Installation Script: $(Split-Path $scriptPath -Leaf)" -ForegroundColor White
+        Write-Host "Script Location: $scriptPath" -ForegroundColor White
         Write-Host "Deployment Info: $intuneInfoPath" -ForegroundColor White
         Write-Host "Log File: $Script:LogFile" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "Next Steps:" -ForegroundColor Cyan
-        Write-Host "1. Upload the .intunewin file to Microsoft Intune" -ForegroundColor White
-        Write-Host "2. Use the deployment info file for configuration guidance" -ForegroundColor White
-        Write-Host "3. Test deployment on a pilot group first" -ForegroundColor White
+        Write-Host "Usage with Existing .intunewin Package:" -ForegroundColor Cyan
+        Write-Host "1. Copy the generated .ps1 script to your existing package folder" -ForegroundColor White
+        Write-Host "2. Re-run IntuneWinAppUtil.exe with the updated script" -ForegroundColor White
+        Write-Host "3. Or use the script with your current .intunewin package" -ForegroundColor White
+        Write-Host "4. Update Intune app configuration using the deployment info" -ForegroundColor White
         Write-Host ""
-    } else {
-        Write-LogMessage "Intune packaging failed, but other components were created successfully" "WARNING"
-        Write-Host ""
-        Write-Host "Partial Success:" -ForegroundColor Yellow
-        Write-Host "===============" -ForegroundColor Yellow
-        Write-Host "The installation script and package were created, but Intune packaging failed." -ForegroundColor White
-        Write-Host "You can manually run IntuneWinAppUtil.exe on the generated files." -ForegroundColor White
     }
     
 } catch {
@@ -1531,4 +1646,4 @@ try {
 Write-Host ""
 Read-Host "Press Enter to exit"
 
-#endregion
+#endregion 
