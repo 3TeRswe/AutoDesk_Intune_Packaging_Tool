@@ -154,4 +154,3 @@ Detailed logs are saved to: `%TEMP%\AutoDesk_Package_Tool_YYYYMMDD_HHMMSS.log`
 - No sensitive data is stored or transmitted
 - PowerShell execution policy bypass is used for deployment flexibility
 
-**Made with ❤️ for the Microsoft Intune and AutoDesk community**
