@@ -25,6 +25,9 @@ A comprehensive PowerShell tool for automatically packaging AutoDesk application
 
 ## Installation
 
+- View installation guide under Wiki page or klick link:
+https://github.com/3TeRswe/AutoDesk_Intune_Packaging_Tool/wiki/Usage-and-Deployment-Guide
+
 ### Method 1: Direct Download
 ```powershell
 # Download the script
