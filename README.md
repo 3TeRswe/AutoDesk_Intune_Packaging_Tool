@@ -31,7 +31,7 @@ https://github.com/3TeRswe/AutoDesk_Intune_Packaging_Tool/wiki/Usage-and-Deploym
 ### Method 1: Direct Download
 ```powershell
 # Download the script
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/yourusername/autodesk-package-tool/main/AutoDesk_Package_Tool.ps1" -OutFile "AutoDesk_Package_Tool.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/3TeRswe/autodesk-package-tool/main/AutoDesk_Package_Tool.ps1" -OutFile "AutoDesk_Package_Tool.ps1"
 
 # Run as Administrator
 .\AutoDesk_Package_Tool.ps1
@@ -39,7 +39,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/yourusername/autodesk-
 
 ### Method 2: Clone Repository
 ```bash
-git clone https://github.com/yourusername/autodesk-package-tool.git
+git clone https://github.com/3TeRswe/autodesk-package-tool.git
 cd autodesk-package-tool
 ```
 
