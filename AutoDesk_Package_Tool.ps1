@@ -1,4 +1,8 @@
- # Enhanced AutoDesk Package Tool
+# Copyright (c) 2026 Lucas Berger
+# Licensed under the MIT License.
+# https://github.com/3TeRswe
+
+# Enhanced AutoDesk Package Tool
 # Version: 2.0
 # Enhanced with comprehensive error handling, validation, and logging
 #
@@ -1647,3 +1651,4 @@ Write-Host ""
 Read-Host "Press Enter to exit"
 
 #endregion 
+
